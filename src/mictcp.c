@@ -9,34 +9,38 @@
 #define LOST 10
 #define LOSTRATE "15"
 
+
+mic_tcp_sock sock;
+mic_tcp_pdu pdu;
+
+int PE,PA = 0;
+float lostpdu = 0.0;
+float lostrate = 15.0;
+
+int pduemis =0;
+int fenetre[SIZE]; 
+
+void init (int* tab,int size){
+    for(int i=0;i<size;i++){
+        tab[i]=0;
+    }
+}
+
+float rate(int* tab, int size){
+    float s =0.0;
+    for(int i=0; i<size;i++){
+        s += (float)tab[i];
+    }
+    return ((s/(float)SIZE)*100.0); 
+}
+
+pthread_mutex_t mutex= PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond= PTHREAD_COND_INITIALIZER;
+
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
  * Retourne le descripteur du socket ou bien -1 en cas d'erreur
  */
-    mic_tcp_sock sock;
-    mic_tcp_pdu pdu;
-    int PE,PA = 0;
-    float lostpdu = 0.0;
-    float lostrate = 15.0;
-    
-    int pduemis =0;
-    int fenetre[SIZE]; 
-    void init (int* tab,int size){
-        for(int i=0;i<size;i++){
-            tab[i]=0;
-        }
-    }
-    float rate(int* tab, int size){
-        float s =0.0;
-        for(int i=0; i<size;i++){
-            s += (float)tab[i];
-        }
-        return ((s/(float)SIZE)*100.0); 
-    }
-    pthread_mutex_t mutex= PTHREAD_MUTEX_INITIALIZER;
-    pthread_cond_t cond= PTHREAD_COND_INITIALIZER;
- 
-    
 int mic_tcp_socket(start_mode sm)
 {
     int result=-1;
@@ -70,12 +74,13 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    //printf("Je vais dormir\n"); 
     pthread_cond_wait(&cond,&mutex);
-    //printf("Je suis réveillé\n");
-    sock.state = CONNECTED; 
-    
-    return 0;
+    if (sock.fd == socket){
+        sock.state = CONNECTED; 
+        return 0;
+    } else {
+        return -1;
+    }
 }
 
 /*
@@ -105,19 +110,17 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
     
     pdu.header.ack = 0;
     pdu.header.syn = 0;
-    printf("Test1\n");
+
     while(pdu.header.syn != 1 && pdu.header.ack !=1){ 
         
         if(count == max){return(-1);}
         if (count != 0)
             printf("Paquet message perdu \n");
         count++;
-        printf("Test2\n");
         if((sent=IP_send(pdusyn,addr))==-1){
             printf("Erreur d'envoi du pdu\n");
             exit(1);
         }
-        printf("Test2\n");
         test=(IP_recv(&pdu,&sock.addr,TIMEOUT2) ==-1);
 
         
@@ -134,7 +137,6 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
         if(count == max)
             exit(-1);
     }
-    printf("Test2\n");
     ack.header.ack = 1;
     ack.header.ack_num= PA; 
     ack.header.seq_num=PE; 
@@ -212,8 +214,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             while(pdu.header.ack_num!=PE){
                 count++;
                 if(count == max){exit(-1);}
-                printf("Paquet message perdu \n");
-                
+                    printf("Paquet message perdu \n");
                 if((sent=IP_send(pdu,sock.addr))==-1){
                     printf("Erreur d'envoi du pdu");
                     exit(1);
@@ -221,7 +222,8 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
                 test=(IP_recv(&pdu,&sock.addr,TIMEOUT) ==-1);  
                 while(count < max && test){
                     count++;
-                    if(count == max){exit(-1);}
+                    if(count == max)
+                        exit(-1);
                     if(IP_send(mem,sock.addr)==-1){
                         printf("Erreur d'envoi du pdu");
                         exit(1);
@@ -234,8 +236,6 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             } 
         }
     }
-    
-
     return sent;
 }
 
@@ -285,7 +285,6 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
         }else{
             printf("Paquet Ack perdu\n");
         }
-        printf("avant send\n");
         ack.header.ack=1;
         ack.header.ack_num=PA;
         ack.payload.data="";
@@ -305,7 +304,6 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
         while(paqu.header.syn != 1){
             test=(IP_recv(&paqu,&sock.addr,TIMEOUT) ==-1); 
             if(test){}
-                //printf("En attente\n");
         }
         mic_tcp_pdu sack;
         
@@ -346,7 +344,5 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
         printf("Connected\n");
         pthread_cond_broadcast(&cond);
         sock.state = CONNECTED;
-
     }
-    
 }
